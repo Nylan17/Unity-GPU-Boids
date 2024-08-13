@@ -161,7 +161,7 @@ GameObject:
   serializedVersion: 5
   m_Component:
   - component: {fileID: 4768144088153030}
-  - component: {fileID: 114014898953790234}
+  - component: {fileID: 114006275991162358}
   m_Layer: 0
   m_Name: GPU_Flock_Skinned_Affector
   m_TagString: Untagged
@@ -441,7 +441,7 @@ Animator:
   m_WarningMessage: 
   m_HasTransformHierarchy: 1
   m_AllowConstantClipSamplingOptimization: 1
---- !u!114 &114014898953790234
+--- !u!114 &114006275991162358
 MonoBehaviour:
   m_ObjectHideFlags: 1
   m_PrefabParentObject: {fileID: 0}
@@ -449,23 +449,42 @@ MonoBehaviour:
   m_GameObject: {fileID: 1852831396474288}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 0399e4892d68fcd4d801bafb1f5de8ca, type: 3}
+  m_Script: {fileID: 11500000, guid: daebc6b59d7a38d499fea4b9fea3dd6f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _ComputeFlock: {fileID: 7200000, guid: e50ae7b929e185a40bd9c1939ca5a13f, type: 3}
+  _ComputeFlock: {fileID: 7200000, guid: 5568b312b2a20c84bbed9844c70d10d3, type: 3}
   TargetBoidToGPUSkin: {fileID: 1414579549428172}
-  _AnimationClip: {fileID: 7400000, guid: 8ec9bd4530b42b446938d365f3bba972, type: 3}
-  BoidsCount: 32000
-  SpawnRadius: 10
   Target: {fileID: 4440410675872396}
   BoidMesh: {fileID: 4300000, guid: 8ec9bd4530b42b446938d365f3bba972, type: 3}
-  BoidMaterial: {fileID: 2100000, guid: 167b6806939d4a24497f112481564573, type: 2}
+  BoidMaterial: {fileID: 2100000, guid: f79a98ae65808b84c850013a4d6937aa, type: 2}
+  _AnimationClip: {fileID: 7400000, guid: 8ec9bd4530b42b446938d365f3bba972, type: 3}
+  UseAffectors: 1
+  DrawingAffectors: {fileID: 4900000, guid: ccec4b6811b96fc4090ba47d4c7ebf9e, type: 3}
+  UseMeshAffectors: 0
+  MeshAffectors: {fileID: 4300004, guid: af7e508e07ae8d840a01c26f5bc95b0d, type: 3}
+  ScaleDrawingAffectors: 0.07
+  ReverseYAxisDrawingAffectors: 0
+  DrawingAffectorsOffset: {x: 0, y: 0, z: 0}
+  DrawDrawingAffectors: 0
+  BoidsCount: 32000
+  StepBoidCheckNeighbours: 1
+  SpawnRadius: 10
   RotationSpeed: 4
   BoidSpeed: 6
   NeighbourDistance: 2
   BoidSpeedVariation: 0.9
   BoidFrameSpeed: 10
   FrameInterpolation: 1
+  AffectorForce: 4
+  AffectorDistance: 2
+  MaxAffectorFullAxisSize: 20
+  UseTemperature: 1
+  Temperature: 1
+  TemperatureDataFile: {fileID: 4900000, guid: 4f8986b3e72f20f4398acbfc4ef899ee, type: 3}
+  DrawILoveUnity: 0
+  EyeDrawing: {fileID: 4900000, guid: baa591aa1ff30ec4da72b35d2c6faf26, type: 3}
+  HeartDrawing: {fileID: 4900000, guid: 7e19862a01602264d939a3fadb1f9f81, type: 3}
+  UnityDrawing: {fileID: 4900000, guid: d8db9368b6c539e49ad6bc39747251ff, type: 3}
 --- !u!114 &114957932010741248
 MonoBehaviour:
   m_ObjectHideFlags: 1

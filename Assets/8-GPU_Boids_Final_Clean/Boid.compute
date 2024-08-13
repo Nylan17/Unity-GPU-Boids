@@ -64,7 +64,16 @@ CBUFFER_START(Params)
 	float AffectorDistance;
 	uint StepBoidCheckNeighbours;
 	float MaxAffectorFullAxisSize = 20;
+
+	float Temperature;
 CBUFFER_END
+
+RWStructuredBuffer<uint> sharedVelocityBuffer;
+RWStructuredBuffer<uint3> sharedPositionBuffer;
+RWStructuredBuffer<uint> sharedOrderBuffer;
+
+// Scaling factors for converting float to int
+#define SCALE_FACTOR 1000000
 
 [numthreads(GROUP_SIZE,1,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
@@ -73,7 +82,9 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 	Boid boid = boidBuffer[instanceId];
 
 	float noise = clamp(noise1(_Time / 100.0 + boid.noise_offset), -1, 1) * 2.0 - 1.0;
-	float velocity = BoidSpeed * (1.0 + noise * BoidSpeedVariation);
+	//float velocity = BoidSpeed * (1.0 + noise * BoidSpeedVariation);
+	float velocity = BoidSpeed * (1.0 + noise * BoidSpeedVariation) * Temperature;
+
 	
 	// Make slow birds go faster if far away from flock ?
 	float distance_from_flock = distance(boid.position, FlockPosition);
@@ -174,4 +185,15 @@ void CSMain (uint3 id : SV_DispatchThreadID)
 		boid.next_frame = 0;
 
 	boidBuffer[id.x] = boid;
+
+
+
+	// Then perform InterlockedAdd on the shared buffers
+	InterlockedAdd(sharedVelocityBuffer[0], uint(velocity * SCALE_FACTOR));
+	InterlockedAdd(sharedPositionBuffer[0].x, uint(boid_pos.x * SCALE_FACTOR));
+	InterlockedAdd(sharedPositionBuffer[0].y, uint(boid_pos.y * SCALE_FACTOR));
+	InterlockedAdd(sharedPositionBuffer[0].z, uint(boid_pos.z * SCALE_FACTOR));
+	InterlockedAdd(sharedOrderBuffer[0], uint(dot(boid.direction, boid.direction) * SCALE_FACTOR));
+
+
 }

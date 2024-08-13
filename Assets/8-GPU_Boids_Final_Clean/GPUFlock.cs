@@ -4,6 +4,48 @@ using UnityEngine;
 using System.Linq;
 using System.Runtime.InteropServices;
 
+using System.IO; // For writing to files
+
+public class MetricsRecorder
+{
+    private List<float> avgVelocities = new List<float>();
+    private List<Vector3> avgPositions = new List<Vector3>();
+    private List<float> localOrders = new List<float>();
+
+    public void AddMetrics(float avgVelocity, Vector3 avgPosition, float avgLocalOrder)
+    {
+        avgVelocities.Add(avgVelocity);
+        avgPositions.Add(avgPosition);
+        localOrders.Add(avgLocalOrder);
+    }
+
+    public void SaveMetrics(string filePath)
+    {
+        using (StreamWriter writer = new StreamWriter(filePath))
+        {
+            writer.WriteLine("AvgVelocity,AvgPositionX,AvgPositionY,AvgPositionZ,LocalOrder");
+
+            for (int i = 0; i < avgVelocities.Count; i++)
+            {
+                if (avgVelocities[i] != 0 || avgPositions[i] != Vector3.zero || localOrders[i] != 0)
+                {
+                    string line = avgVelocities[i].ToString("F6") + "," +
+                                  avgPositions[i].x.ToString("F6") + "," +
+                                  avgPositions[i].y.ToString("F6") + "," +
+                                  avgPositions[i].z.ToString("F6") + "," +
+                                  localOrders[i].ToString("F6");
+
+                    writer.WriteLine(line);
+                }
+            }
+        }
+    }
+
+}
+
+
+
+
 public class GPUFlock : MonoBehaviour {
     public struct GPUBoid
     {
@@ -70,8 +112,46 @@ public class GPUFlock : MonoBehaviour {
 
     private const int THREAD_GROUP_SIZE = 256;
 
+    public bool UseTemperature = true;
+    public float Temperature = 1.0f; // Default temperature
+    public TextAsset TemperatureDataFile;
+    private float[] temperatureData;
+    private int currentTemperatureIndex = 0;
+
+    private ComputeBuffer avgVelocityBuffer;
+    private ComputeBuffer avgPositionBuffer;
+    private ComputeBuffer localOrderBuffer;
+
+    private List<float> averageVelocities = new List<float>();
+    private List<Vector3> averagePositions = new List<Vector3>();
+    private List<float> localOrders = new List<float>();
+
+    private float[] avgVelocityData;
+    private Vector3[] avgPositionData;
+    private float[] localOrderData;
+
+    private MetricsRecorder metricsRecorder = new MetricsRecorder();
+
+    void StoreMetrics(float avgVelocity, Vector3 avgPosition, float avgLocalOrder)
+    {
+        // Add the current frame's metrics to the lists
+        metricsRecorder.AddMetrics(avgVelocity, avgPosition, avgLocalOrder);
+    }
+
+    // Optionally, you might want a method to clear these metrics if needed
+    void ClearMetrics()
+    {
+        averageVelocities.Clear();
+        averagePositions.Clear();
+        localOrders.Clear();
+    }
+
+    private bool simulationComplete = false;
+
+
     void Start()
     {
+
         BoidMaterial = new Material(BoidMaterial);
         
         _drawArgsBuffer = new ComputeBuffer(
@@ -108,12 +188,64 @@ public class GPUFlock : MonoBehaviour {
         else
             AffectorBuffer = new ComputeBuffer(1, Marshal.SizeOf(typeof(GPUAffector)));
 
+
+        avgVelocityData = new float[1];
+        avgPositionData = new Vector3[1];
+        localOrderData = new float[1];
+        
+
+        // Initialize metric buffers
+        avgVelocityBuffer = new ComputeBuffer(1, sizeof(float));
+        avgPositionBuffer = new ComputeBuffer(1, sizeof(float) * 3);
+        localOrderBuffer = new ComputeBuffer(1, sizeof(float));
+
+        // Bind all buffers to the compute shader
+        _ComputeFlock.SetBuffer(kernelHandle, "boidBuffer", BoidBuffer);
+        _ComputeFlock.SetBuffer(kernelHandle, "affectorBuffer", AffectorBuffer);
+
+        _ComputeFlock.SetBuffer(kernelHandle, "sharedVelocityBuffer", avgVelocityBuffer);
+        _ComputeFlock.SetBuffer(kernelHandle, "sharedPositionBuffer", avgPositionBuffer);
+        _ComputeFlock.SetBuffer(kernelHandle, "sharedOrderBuffer", localOrderBuffer);
+
+        // Initialize temperature data
+        LoadTemperatureData();
+
+
         SetComputeData();
         SetMaterialData();
 
         if (DrawILoveUnity)
             StartCoroutine(DrawILoveUnityForever());
+
     }
+
+    void LoadTemperatureData()
+    {
+        if (TemperatureDataFile != null)
+        {
+            string[] lines = TemperatureDataFile.text.Split(new char[] { '\n' }, System.StringSplitOptions.RemoveEmptyEntries);
+            temperatureData = new float[lines.Length];
+            for (int i = 0; i < lines.Length; i++)
+            {
+                float temp = 0.0f;
+                if (float.TryParse(lines[i], out temp))
+                {
+                    temperatureData[i] = temp;
+                }
+                else
+                {
+                    Debug.LogError("Failed to parse temperature value at line " + i);
+                }
+            }
+        }
+        else
+        {
+            Debug.LogError("Temperature data file not assigned in the Inspector!");
+        }
+    }
+
+
+
 
     public bool DrawILoveUnity = false;
     public TextAsset EyeDrawing;
@@ -202,6 +334,7 @@ public class GPUFlock : MonoBehaviour {
         _ComputeFlock.SetInt("StepBoidCheckNeighbours", StepBoidCheckNeighbours);
         _ComputeFlock.SetBuffer(this.kernelHandle, "boidBuffer", BoidBuffer);
         _ComputeFlock.SetBuffer(this.kernelHandle, "affectorBuffer", AffectorBuffer);
+        _ComputeFlock.SetFloat("Temperature", Temperature);
     }
 
     void SetMaterialData() {
@@ -215,17 +348,63 @@ public class GPUFlock : MonoBehaviour {
         BoidMaterial.SetInt("NbFrames", NbFramesInAnimation);
     }
 
-
     // Execution order should be the lowest possible
+    private const int SCALE_FACTOR = 1000000;
+
     void Update() {
+
+        if (UseTemperature && temperatureData != null && currentTemperatureIndex < temperatureData.Length)
+        {
+            Temperature = temperatureData[currentTemperatureIndex];
+            currentTemperatureIndex++;
+        }
+        else
+        {
+            Temperature = 1.0f; // Default to neutral if not using temperature
+        }
+
+
     #if UNITY_EDITOR
         SetComputeData();
         SetMaterialData();
-    #endif
+#endif
 
-        _ComputeFlock.Dispatch(this.kernelHandle, this.BoidsCount / THREAD_GROUP_SIZE + 1, 1, 1);
+        _ComputeFlock.Dispatch(kernelHandle, BoidsCount / THREAD_GROUP_SIZE + 1, 1, 1);
 
-        GL.Flush(); // Make sure our Dispatch() execute right now
+        //GL.Flush();
+
+        // Read back the computed metrics
+        avgVelocityBuffer.GetData(avgVelocityData);
+        avgPositionBuffer.GetData(avgPositionData);
+        localOrderBuffer.GetData(localOrderData);
+
+        float avgVelocity = (avgVelocityData[0] / (float)SCALE_FACTOR) / BoidsCount;
+        Vector3 avgPosition = new Vector3(
+            (avgPositionData[0].x / (float)SCALE_FACTOR) / BoidsCount,
+            (avgPositionData[0].y / (float)SCALE_FACTOR) / BoidsCount,
+            (avgPositionData[0].z / (float)SCALE_FACTOR) / BoidsCount
+        );
+        float avgLocalOrder = (localOrderData[0] / (float)SCALE_FACTOR) / BoidsCount;
+
+        StoreMetrics(avgVelocity, avgPosition, avgLocalOrder);
+        Debug.Log("Converted AvgVelocity: " + avgVelocity);
+        Debug.Log("Converted AvgPosition: " + avgPosition);
+        Debug.Log("Converted LocalOrder: " + avgLocalOrder);
+
+        avgVelocityBuffer.SetData(new uint[] { 1 });
+        //avgPositionBuffer.SetData(new uint3[] { new uint3(0, 0, 0) });
+        localOrderBuffer.SetData(new uint[] { 0 });
+
+
+        if (currentTemperatureIndex >= temperatureData.Length)
+        {
+            simulationComplete = true;
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+        Application.Quit(); // Quit application if not in editor
+#endif
+        }
     }
 
     // Execution order should be the highest possible
@@ -239,6 +418,15 @@ public class GPUFlock : MonoBehaviour {
         if (AffectorBuffer != null) AffectorBuffer.Release();
         if (_drawArgsBuffer != null) _drawArgsBuffer.Release();
         if (VertexAnimationBuffer != null) VertexAnimationBuffer.Release();
+
+        if (avgVelocityBuffer != null) avgVelocityBuffer.Release();
+        if (avgPositionBuffer != null) avgPositionBuffer.Release();
+        if (localOrderBuffer != null) localOrderBuffer.Release();
+
+        if (simulationComplete) // Ensure file is only saved when the simulation completes
+        {
+            metricsRecorder.SaveMetrics("MetricsOutput.csv");
+        }
     }
 
     private void GenerateSkinnedAnimationForGPUBuffer()
