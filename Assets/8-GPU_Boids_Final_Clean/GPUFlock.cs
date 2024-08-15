@@ -4,43 +4,176 @@ using UnityEngine;
 using System.Linq;
 using System.Runtime.InteropServices;
 
-using System.IO; // For writing to files
+using System.IO; // starting my stuff
 
 public class MetricsRecorder
 {
     private List<float> avgVelocities = new List<float>();
     private List<Vector3> avgPositions = new List<Vector3>();
     private List<float> localOrders = new List<float>();
+    private List<float> temperatures = new List<float>();
 
-    public void AddMetrics(float avgVelocity, Vector3 avgPosition, float avgLocalOrder)
+    public void AddMetrics(float avgVelocity, Vector3 avgPosition, float avgLocalOrder, float temperature)
     {
         avgVelocities.Add(avgVelocity);
         avgPositions.Add(avgPosition);
         localOrders.Add(avgLocalOrder);
+        temperatures.Add(temperature);
     }
 
     public void SaveMetrics(string filePath)
     {
         using (StreamWriter writer = new StreamWriter(filePath))
         {
-            writer.WriteLine("AvgVelocity,AvgPositionX,AvgPositionY,AvgPositionZ,LocalOrder");
+            writer.WriteLine("AvgVelocity,AvgPositionX,AvgPositionY,AvgPositionZ,LocalOrder,Temperature");
 
             for (int i = 0; i < avgVelocities.Count; i++)
             {
-                if (avgVelocities[i] != 0 || avgPositions[i] != Vector3.zero || localOrders[i] != 0)
-                {
-                    string line = avgVelocities[i].ToString("F6") + "," +
-                                  avgPositions[i].x.ToString("F6") + "," +
-                                  avgPositions[i].y.ToString("F6") + "," +
-                                  avgPositions[i].z.ToString("F6") + "," +
-                                  localOrders[i].ToString("F6");
+                string line = avgVelocities[i].ToString("F6") + "," +
+                              avgPositions[i].x.ToString("F6") + "," +
+                              avgPositions[i].y.ToString("F6") + "," +
+                              avgPositions[i].z.ToString("F6") + "," +
+                              localOrders[i].ToString("F6") + "," +
+                              temperatures[i].ToString("F6");
 
-                    writer.WriteLine(line);
-                }
+                writer.WriteLine(line);
             }
         }
     }
 
+    public float[][] GetMetrics()
+    {
+        int count = avgVelocities.Count;
+        float[][] metrics = new float[count][];
+
+        for (int i = 0; i < count; i++)
+        {
+            metrics[i] = new float[]
+            {
+                avgVelocities[i],
+                avgPositions[i].x,
+                avgPositions[i].y,
+                avgPositions[i].z,
+                localOrders[i]
+            };
+        }
+
+        return metrics;
+    }
+
+    public float[] GetTemperatures()
+    {
+        return temperatures.ToArray();
+    }
+
+    public void Clear()
+    {
+        avgVelocities.Clear();
+        avgPositions.Clear();
+        localOrders.Clear();
+        temperatures.Clear();
+    }
+}
+
+
+public class DataSplitter
+{
+    public static void SplitData(float[] inputData, out float[] trainData, out float[] testData, float trainRatio = 0.7f)
+    {
+        int trainSize = (int)(inputData.Length * trainRatio);
+        trainData = new float[trainSize];
+        testData = new float[inputData.Length - trainSize];
+
+        for (int i = 0; i < trainSize; i++)
+        {
+            trainData[i] = inputData[i];
+        }
+
+        for (int i = trainSize; i < inputData.Length; i++)
+        {
+            testData[i - trainSize] = inputData[i];
+        }
+    }
+}
+
+
+public class RidgeRegression
+{
+    private float[] weights;
+    private float lambda;
+
+    public RidgeRegression(float lambda =0.1f)// 0.1f)
+    {
+        this.lambda = lambda;
+
+        weights = new float[1]; // Initialize with a default size of 1, or adjust based on your context
+        for (int i = 0; i < weights.Length; i++)
+        {
+            weights[i] = 0f; // Initialize all weights to zero
+        }
+    }
+
+    public void Train(float[][] X, float[] y)
+    {
+        int nFeatures = X[0].Length;
+        int nSamples = X.Length;
+
+        weights = new float[nFeatures];
+
+        for (int i = 0; i < nFeatures; i++)
+        {
+            weights[i] = 0f;
+        }
+
+        float[][] XtX = new float[nFeatures][];
+        for (int i = 0; i < nFeatures; i++)
+        {
+            XtX[i] = new float[nFeatures];
+            for (int j = 0; j < nFeatures; j++)
+            {
+                XtX[i][j] = lambda * (i == j ? 1 : 0);
+                for (int k = 0; k < nSamples; k++)
+                {
+                    XtX[i][j] += X[k][i] * X[k][j];
+                }
+            }
+        }
+
+        float[] Xty = new float[nFeatures];
+        for (int i = 0; i < nFeatures; i++)
+        {
+            Xty[i] = 0;
+            for (int k = 0; k < nSamples; k++)
+            {
+                Xty[i] += X[k][i] * y[k];
+            }
+        }
+
+        for (int i = 0; i < nFeatures; i++)
+        {
+            if (!float.IsNaN(XtX[i][i]) && !float.IsInfinity(XtX[i][i]))
+            {
+                weights[i] = Xty[i] / (XtX[i][i] + lambda + 1e-6f); // Add a small epsilon
+            }
+            else
+            {
+                weights[i] = 0; // Avoid NaN by setting weight to 0 if division would result in NaN
+                Debug.LogError("XtX is NaN or Infinity. Setting corresponding weight to 0: "+ XtX[i][i]);
+            }
+        }
+
+    }
+
+    public float Predict(float[] X)
+    {
+        float result = 0.0f;
+        for (int i = 0; i < weights.Length; i++)
+        {
+            result += weights[i] * X[i];
+            Debug.Log("weights[i]: " + weights[i]);
+        }
+        return result;
+    }
 }
 
 
@@ -122,31 +255,77 @@ public class GPUFlock : MonoBehaviour {
     private ComputeBuffer avgPositionBuffer;
     private ComputeBuffer localOrderBuffer;
 
-    private List<float> averageVelocities = new List<float>();
-    private List<Vector3> averagePositions = new List<Vector3>();
-    private List<float> localOrders = new List<float>();
+    //private List<float> averageVelocities = new List<float>();
+    //private List<Vector3> averagePositions = new List<Vector3>();
+    //private List<float> localOrders = new List<float>();
 
     private float[] avgVelocityData;
     private Vector3[] avgPositionData;
     private float[] localOrderData;
+    private float[] trainData, testData;
+    private List<float> predictions = new List<float>(); // Add this to store predictions
+
 
     private MetricsRecorder metricsRecorder = new MetricsRecorder();
 
     void StoreMetrics(float avgVelocity, Vector3 avgPosition, float avgLocalOrder)
     {
-        // Add the current frame's metrics to the lists
-        metricsRecorder.AddMetrics(avgVelocity, avgPosition, avgLocalOrder);
+        metricsRecorder.AddMetrics(avgVelocity, avgPosition, avgLocalOrder, Temperature);
     }
 
-    // Optionally, you might want a method to clear these metrics if needed
-    void ClearMetrics()
+    public static float[] NormalizeData(float[] inputData)
     {
-        averageVelocities.Clear();
-        averagePositions.Clear();
-        localOrders.Clear();
+        float min = inputData.Min();
+        float max = inputData.Max();
+
+        float[] normalizedData = new float[inputData.Length];
+        for (int i = 0; i < inputData.Length; i++)
+        {
+            normalizedData[i] = 2 * (inputData[i] - min) / (max - min);
+        }
+
+        return normalizedData;
     }
+
+    public static float[][] NormalizeFeatures(float[][] inputData)
+    {
+        int nFeatures = inputData[0].Length;
+        int nSamples = inputData.Length;
+        float[][] normalizedData = new float[nSamples][];
+
+        for (int i = 0; i < nSamples; i++)
+        {
+            normalizedData[i] = new float[nFeatures];
+        }
+
+        for (int feature = 0; feature < nFeatures; feature++)
+        {
+            float min = float.MaxValue;
+            float max = float.MinValue;
+
+            // Find the min and max for each feature
+            for (int sample = 0; sample < nSamples; sample++)
+            {
+                if (inputData[sample][feature] < min) min = inputData[sample][feature];
+                if (inputData[sample][feature] > max) max = inputData[sample][feature];
+            }
+
+            // Normalize each value of the feature to be between 0 and 1
+            for (int sample = 0; sample < nSamples; sample++)
+            {
+                normalizedData[sample][feature] = (inputData[sample][feature] - min) / (max - min);
+            }
+        }
+
+        return normalizedData;
+    }
+
 
     private bool simulationComplete = false;
+
+    private RidgeRegression ridgeRegression = new RidgeRegression(0.1f); // Lambda value
+    private bool isTraining = true;
+
 
 
     void Start()
@@ -209,6 +388,13 @@ public class GPUFlock : MonoBehaviour {
 
         // Initialize temperature data
         LoadTemperatureData();
+        // Normalize the data to be between 0 and 2
+        float[] normalizedTemperatureData = NormalizeData(temperatureData);
+
+        // Split the normalized data into training and test sets
+        DataSplitter.SplitData(normalizedTemperatureData, out trainData, out testData);
+        //DataSplitter.SplitData(temperatureData, out trainData, out testData);
+
 
 
         SetComputeData();
@@ -349,28 +535,79 @@ public class GPUFlock : MonoBehaviour {
     }
 
     // Execution order should be the lowest possible
-    private const int SCALE_FACTOR = 1000000;
+    private const int SCALE_FACTOR = 100;//1000000;
 
     void Update() {
 
-        if (UseTemperature && temperatureData != null && currentTemperatureIndex < temperatureData.Length)
+        if (isTraining)
         {
-            Temperature = temperatureData[currentTemperatureIndex];
-            currentTemperatureIndex++;
+            if (UseTemperature && trainData != null && currentTemperatureIndex < trainData.Length)
+            {
+                Temperature = trainData[currentTemperatureIndex];
+                currentTemperatureIndex++;
+            }
+            else
+            {
+                Temperature = 1.0f; // Default to neutral
+            }
+            if (currentTemperatureIndex >= trainData.Length)
+            {
+                // Training is complete, now train the ridge regression model
+                TrainRidgeRegression();
+                isTraining = false; // Switch to testing phase
+                currentTemperatureIndex = 0; // Reset index for testing
+                //metricsRecorder.Clear(); // Clear metrics before testing
+                Debug.Log("Training complete. Moving to testing phase.");
+            }
         }
         else
         {
-            Temperature = 1.0f; // Default to neutral if not using temperature
+            // Testing phase
+            if (UseTemperature && testData != null && currentTemperatureIndex < testData.Length)
+            {
+                Temperature = testData[currentTemperatureIndex];
+                currentTemperatureIndex++;
+            }
+            else
+            {
+                Temperature = 1.0f;
+            }
+
+            if (currentTemperatureIndex < testData.Length)
+            {
+                // Predict using the trained model
+                float[] currentMetrics = new float[]
+                {
+                    avgVelocityData[0] ,/// SCALE_FACTOR,
+                    avgPositionData[0].x ,/// SCALE_FACTOR,
+                    avgPositionData[0].y ,/// SCALE_FACTOR,
+                    avgPositionData[0].z ,/// SCALE_FACTOR,
+                    localOrderData[0] ,/// SCALE_FACTOR
+                };
+
+                float prediction = ridgeRegression.Predict(currentMetrics);
+                predictions.Add(prediction);
+            }
+
+            if (currentTemperatureIndex >= testData.Length)
+            {
+                // Save predictions to CSV
+                SavePredictions("PredictionsOutput.csv");
+                simulationComplete = true;
+#if UNITY_EDITOR
+                UnityEditor.EditorApplication.isPlaying = false;
+#else
+                Application.Quit();
+#endif
+            }
         }
 
-
-    #if UNITY_EDITOR
+#if UNITY_EDITOR
         SetComputeData();
         SetMaterialData();
 #endif
 
         _ComputeFlock.Dispatch(kernelHandle, BoidsCount / THREAD_GROUP_SIZE + 1, 1, 1);
-
         //GL.Flush();
 
         // Read back the computed metrics
@@ -378,25 +615,25 @@ public class GPUFlock : MonoBehaviour {
         avgPositionBuffer.GetData(avgPositionData);
         localOrderBuffer.GetData(localOrderData);
 
-        float avgVelocity = (avgVelocityData[0] / (float)SCALE_FACTOR) / BoidsCount;
+        float combinedScaleFactor = SCALE_FACTOR * BoidsCount;
+        float avgVelocity = avgVelocityData[0] / combinedScaleFactor;
         Vector3 avgPosition = new Vector3(
-            (avgPositionData[0].x / (float)SCALE_FACTOR) / BoidsCount,
-            (avgPositionData[0].y / (float)SCALE_FACTOR) / BoidsCount,
-            (avgPositionData[0].z / (float)SCALE_FACTOR) / BoidsCount
+            avgPositionData[0].x / combinedScaleFactor,
+            avgPositionData[0].y / combinedScaleFactor,
+            avgPositionData[0].z / combinedScaleFactor
         );
-        float avgLocalOrder = (localOrderData[0] / (float)SCALE_FACTOR) / BoidsCount;
+        float avgLocalOrder = localOrderData[0] / combinedScaleFactor;
 
         StoreMetrics(avgVelocity, avgPosition, avgLocalOrder);
-        Debug.Log("Converted AvgVelocity: " + avgVelocity);
-        Debug.Log("Converted AvgPosition: " + avgPosition);
-        Debug.Log("Converted LocalOrder: " + avgLocalOrder);
+        //Debug.Log("Converted AvgVelocity: " + avgVelocity);
+        //Debug.Log("Converted AvgPosition: " + avgPosition);
+        //Debug.Log("Converted LocalOrder: " + avgLocalOrder);
 
-        avgVelocityBuffer.SetData(new uint[] { 1 });
+        //avgVelocityBuffer.SetData(new uint[] { 1 });
         //avgPositionBuffer.SetData(new uint3[] { new uint3(0, 0, 0) });
-        localOrderBuffer.SetData(new uint[] { 0 });
+        //localOrderBuffer.SetData(new uint[] { 0 });
 
-
-        if (currentTemperatureIndex >= temperatureData.Length)
+        if (currentTemperatureIndex >= trainData.Length)
         {
             simulationComplete = true;
 #if UNITY_EDITOR
@@ -406,6 +643,33 @@ public class GPUFlock : MonoBehaviour {
 #endif
         }
     }
+
+    void SavePredictions(string filePath)
+    {
+        using (StreamWriter writer = new StreamWriter(filePath))
+        {
+            writer.WriteLine("Prediction");
+
+            foreach (float prediction in predictions)
+            {
+                writer.WriteLine(prediction.ToString("F6"));
+            }
+        }
+    }
+
+
+    void TrainRidgeRegression()
+    {
+        float[][] X = metricsRecorder.GetMetrics();
+        float[] y = metricsRecorder.GetTemperatures();
+
+        // Normalize the features
+        float[][] normalizedX = NormalizeFeatures(X);
+
+        // Train the ridge regression model with normalized features
+        ridgeRegression.Train(normalizedX, y);
+    }
+
 
     // Execution order should be the highest possible
     void LateUpdate() {

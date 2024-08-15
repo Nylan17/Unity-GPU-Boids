@@ -73,7 +73,7 @@ RWStructuredBuffer<uint3> sharedPositionBuffer;
 RWStructuredBuffer<uint> sharedOrderBuffer;
 
 // Scaling factors for converting float to int
-#define SCALE_FACTOR 1000000
+#define SCALE_FACTOR 100//1000000
 
 [numthreads(GROUP_SIZE,1,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
